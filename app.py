@@ -94,131 +94,35 @@ def extract_text(uploaded_file) -> str:
 
 def find_json_in_text(s: str):
     """
-    Robustly find and parse a JSON object/array within arbitrary model text.
-    Handles:
-      - Markdown code fences ```json ... ```
-      - Smart quotes → standard quotes
-      - Trailing commas before } or ]
-      - Greedy bracket matching by using a balanced scanner that ignores quoted text
-    Returns parsed JSON (dict or list) or None.
+    Try to find JSON array/object in the generated text and parse it.
+    Returns parsed JSON or None.
     """
-    if not isinstance(s, str) or not s.strip():
-        return None
-
-    def normalize_quotes(text: str) -> str:
-        # Replace smart quotes and zero-width spaces
-        return (
-            text.replace("\u201c", '"').replace("\u201d", '"')
-                .replace("\u2018", "'").replace("\u2019", "'")
-                .replace("“", '"').replace("”", '"')
-                .replace("‘", "'").replace("’", "'")
-                .replace("\u200b", "")
-        )
-
-    def remove_code_fences(text: str) -> list[str]:
-        # Return candidate chunks prioritizing fenced blocks if present
-        blocks = re.findall(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.IGNORECASE | re.DOTALL)
-        return blocks if blocks else [text]
-
-    def clean_trailing_commas(text: str) -> str:
-        # Remove trailing commas before } or ] repeatedly until stable
-        prev = None
-        curr = text
-        while prev != curr:
-            prev = curr
-            curr = re.sub(r",\s*([}\]])", r"\1", curr)
-        return curr
-
-    def extract_balanced_chunk(text: str) -> list[str]:
-        # Extract first balanced {...} or [...] ignoring brackets inside strings
-        results = []
-        for opener, closer in [("[", "]"), ("{", "}")]:
-            start = text.find(opener)
-            if start == -1:
-                continue
-            i = start
-            depth = 0
-            in_str = False
-            esc = False
-            while i < len(text):
-                ch = text[i]
-                if in_str:
-                    if esc:
-                        esc = False
-                    elif ch == "\\":
-                        esc = True
-                    elif ch == '"':
-                        in_str = False
-                else:
-                    if ch == '"':
-                        in_str = True
-                    elif ch == opener:
-                        depth += 1
-                    elif ch == closer:
-                        depth -= 1
-                        if depth == 0:
-                            results.append(text[start:i+1])
-                            break
-                i += 1
-        return results
-
-    # Build candidate strings to parse
-    base = normalize_quotes(s)
-    candidates = []
-    for chunk in remove_code_fences(base):
-        chunk = chunk.strip()
-        # direct
-        candidates.append(chunk)
-        # balanced extraction
-        candidates.extend(extract_balanced_chunk(chunk))
-
-    # Try to load candidates with cleanup passes
-    seen = set()
-    for cand in candidates:
-        if not cand or cand in seen:
-            continue
-        seen.add(cand)
-        try:
-            return json.loads(cand)
-        except Exception:
-            pass
-        fixed = clean_trailing_commas(cand)
-        try:
-            return json.loads(fixed)
-        except Exception:
-            # Sometimes models output single quotes — try a very conservative replacement
-            if '"' not in fixed and "'" in fixed:
-                alt = fixed.replace("'", '"')
-                try:
-                    return json.loads(alt)
-                except Exception:
-                    pass
-            continue
-    return None
-
-def strip_thoughts(text: str) -> str:
-    """
-    Remove any 'thought'/'reasoning' content from model output.
-    - Strips XML-like tags: <think>...</think>, <thinking>...</thinking>, etc.
-    - Removes leading lines like "Thought:" or "Reasoning:" blocks.
-    Returns cleaned text.
-    """
-    if not isinstance(text, str):
-        return text
-    cleaned = text
-    # Remove XML-like reasoning blocks
-    tag_patterns = [
-        r"<think>.*?</think>",
-        r"<thinking>.*?</thinking>",
-        r"<chain_of_thought>.*?</chain_of_thought>",
-        r"<reasoning>.*?</reasoning>",
+    # Try direct parse first
+    try:
+        return json.loads(s)
+    except Exception:
+        pass
+    # Try to extract the first JSON array/object within text using regex
+    patterns = [
+        r"(\[.*\])",  # JSON array
+        r"(\{.*\})"   # JSON object
     ]
-    for pat in tag_patterns:
-        cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE | re.DOTALL)
-
-    # Remove prefixed reasoning paragraphs like "Thought:" or "Reasoning:" up to a blank line
-    cleaned = re.sub(r"(?is)^\s*(thoughts?|reasoning)\s*:\s*.*?(\n\s*\n|$)", "", cleaned)
-    return cleaned.strip()
+    for pat in patterns:
+        match = re.search(pat, s, re.DOTALL)
+        if match:
+            candidate = match.group(1)
+            # Try to fix trailing commas and parse
+            try:
+                return json.loads(candidate)
+            except Exception:
+                # attempt simple cleanup
+                cleaned = re.sub(r",\s*}", "}", candidate)
+                cleaned = re.sub(r",\s*\]", "]", cleaned)
+                try:
+                    return json.loads(cleaned)
+                except Exception:
+                    continue
+    return None
 
 def risk_icon(level: str):
     l = (level or "").strip().lower()
@@ -312,7 +216,6 @@ industry = st.sidebar.selectbox("Select Industry Type:", ["General", "Banking", 
 st.sidebar.markdown("---")
 st.sidebar.markdown("⚙️ This demo uses the `ibm-granite/granite-13b-instruct` model via Hugging Face Inference API.")
 st.sidebar.markdown("Tip: Keep documents under ~20 pages for best results. The app sends the first chunk of the document to the model.")
-show_debug = st.sidebar.checkbox("Developer: show debug output", value=False)
 
 uploaded_file = st.file_uploader("Upload a document (.pdf, .docx, .txt)", type=["pdf", "docx", "txt"])
 
@@ -358,7 +261,6 @@ If no issues are found, return an empty JSON array: []
                     {"role": "user", "content": base_prompt}
                 ]
                 raw = query_chat(messages, max_tokens=1024, temperature=0.0)
-                raw = strip_thoughts(raw)
             except Exception as e:
                 st.error("Model query failed: " + str(e))
                 raw = None
@@ -366,9 +268,8 @@ If no issues are found, return an empty JSON array: []
         if raw is None:
             st.error("No response from model.")
         else:
-            if show_debug:
-                st.subheader("Raw model output (first 2000 chars) — debug")
-                st.text(raw[:2000])
+            st.subheader("Raw model output (first 2000 chars) — for debugging")
+            st.text(raw[:2000])
 
             parsed = find_json_in_text(raw)
             if parsed is None:
