@@ -94,34 +94,106 @@ def extract_text(uploaded_file) -> str:
 
 def find_json_in_text(s: str):
     """
-    Try to find JSON array/object in the generated text and parse it.
-    Returns parsed JSON or None.
+    Robustly find and parse a JSON object/array within arbitrary model text.
+    Handles:
+      - Markdown code fences ```json ... ```
+      - Smart quotes → standard quotes
+      - Trailing commas before } or ]
+      - Greedy bracket matching by using a balanced scanner that ignores quoted text
+    Returns parsed JSON (dict or list) or None.
     """
-    # Try direct parse first
-    try:
-        return json.loads(s)
-    except Exception:
-        pass
-    # Try to extract the first JSON array/object within text using regex
-    patterns = [
-        r"(\[.*\])",  # JSON array
-        r"(\{.*\})"   # JSON object
-    ]
-    for pat in patterns:
-        match = re.search(pat, s, re.DOTALL)
-        if match:
-            candidate = match.group(1)
-            # Try to fix trailing commas and parse
-            try:
-                return json.loads(candidate)
-            except Exception:
-                # attempt simple cleanup
-                cleaned = re.sub(r",\s*}", "}", candidate)
-                cleaned = re.sub(r",\s*\]", "]", cleaned)
+    if not isinstance(s, str) or not s.strip():
+        return None
+
+    def normalize_quotes(text: str) -> str:
+        # Replace smart quotes and zero-width spaces
+        return (
+            text.replace("\u201c", '"').replace("\u201d", '"')
+                .replace("\u2018", "'").replace("\u2019", "'")
+                .replace("“", '"').replace("”", '"')
+                .replace("‘", "'").replace("’", "'")
+                .replace("\u200b", "")
+        )
+
+    def remove_code_fences(text: str) -> list[str]:
+        # Return candidate chunks prioritizing fenced blocks if present
+        blocks = re.findall(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.IGNORECASE | re.DOTALL)
+        return blocks if blocks else [text]
+
+    def clean_trailing_commas(text: str) -> str:
+        # Remove trailing commas before } or ] repeatedly until stable
+        prev = None
+        curr = text
+        while prev != curr:
+            prev = curr
+            curr = re.sub(r",\s*([}\]])", r"\1", curr)
+        return curr
+
+    def extract_balanced_chunk(text: str) -> list[str]:
+        # Extract first balanced {...} or [...] ignoring brackets inside strings
+        results = []
+        for opener, closer in [("[", "]"), ("{", "}")]:
+            start = text.find(opener)
+            if start == -1:
+                continue
+            i = start
+            depth = 0
+            in_str = False
+            esc = False
+            while i < len(text):
+                ch = text[i]
+                if in_str:
+                    if esc:
+                        esc = False
+                    elif ch == "\\":
+                        esc = True
+                    elif ch == '"':
+                        in_str = False
+                else:
+                    if ch == '"':
+                        in_str = True
+                    elif ch == opener:
+                        depth += 1
+                    elif ch == closer:
+                        depth -= 1
+                        if depth == 0:
+                            results.append(text[start:i+1])
+                            break
+                i += 1
+        return results
+
+    # Build candidate strings to parse
+    base = normalize_quotes(s)
+    candidates = []
+    for chunk in remove_code_fences(base):
+        chunk = chunk.strip()
+        # direct
+        candidates.append(chunk)
+        # balanced extraction
+        candidates.extend(extract_balanced_chunk(chunk))
+
+    # Try to load candidates with cleanup passes
+    seen = set()
+    for cand in candidates:
+        if not cand or cand in seen:
+            continue
+        seen.add(cand)
+        try:
+            return json.loads(cand)
+        except Exception:
+            pass
+        fixed = clean_trailing_commas(cand)
+        try:
+            return json.loads(fixed)
+        except Exception:
+            # Sometimes models output single quotes — try a very conservative replacement
+            if '"' not in fixed and "'" in fixed:
+                alt = fixed.replace("'", '"')
                 try:
-                    return json.loads(cleaned)
+                    return json.loads(alt)
                 except Exception:
-                    continue
+                    pass
+            continue
     return None
 
 def strip_thoughts(text: str) -> str:
