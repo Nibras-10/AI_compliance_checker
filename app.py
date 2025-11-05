@@ -1,4 +1,5 @@
 # app.py
+import os
 import streamlit as st
 import requests
 import PyPDF2
@@ -17,36 +18,54 @@ st.set_page_config(page_title="AI Compliance Checker", page_icon="🧾", layout=
 try:
     HF_TOKEN = st.secrets["HF_TOKEN"]
 except Exception:
-    HF_TOKEN = None
+    HF_TOKEN = os.environ.get("HF_TOKEN")
 
-API_URL = "https://api-inference.huggingface.co/models/ibm-granite/granite-13b-instruct"
+# Use Hugging Face Router (OpenAI-compatible) to access MiniMax chat model
+API_URL = "https://router.huggingface.co/v1/chat/completions"
 HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
 
 # ------------------- HELPERS -------------------
-def query_model(prompt: str, max_length=1024):
+def query_chat(messages, max_tokens=1024, temperature=0.0):
     """
-    Query Hugging Face Inference API with a prompt.
-    Returns the raw text the model generated.
+    Query MiniMax via Hugging Face Router (OpenAI-compatible /v1/chat/completions).
+    messages: list of {role, content}
+    Returns the assistant message content (string) or best-effort text.
     """
     payload = {
-        "inputs": prompt,
-        "parameters": {"max_new_tokens": max_length, "temperature": 0.0},
+        "model": "MiniMaxAI/MiniMax-M2:novita",
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
     }
     resp = requests.post(API_URL, headers=HEADERS, json=payload, timeout=120)
-    # Handle possible response shapes
     try:
         data = resp.json()
     except Exception:
         return resp.text
 
-    # Common cases:
-    # 1) List with dicts: [{'generated_text': '...'}]
-    if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict) and "generated_text" in data[0]:
-        return data[0]["generated_text"]
-    # 2) Dict with 'generated_text'
-    if isinstance(data, dict) and "generated_text" in data:
-        return data["generated_text"]
-    # 3) Sometimes API returns plain text inside a dict or string
+    # OpenAI-style response handling
+    if isinstance(data, dict) and "choices" in data and data["choices"]:
+        choice = data["choices"][0] or {}
+        # Some routers use choice["message"]["content"]
+        if isinstance(choice, dict) and "message" in choice:
+            msg = choice.get("message") or {}
+            content = msg.get("content")
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                # Join text parts if returned as a list of segments
+                parts = []
+                for seg in content:
+                    if isinstance(seg, dict) and seg.get("type") == "text":
+                        parts.append(seg.get("text", ""))
+                    elif isinstance(seg, str):
+                        parts.append(seg)
+                if parts:
+                    return "".join(parts)
+        # Fallbacks sometimes provide 'text'
+        if isinstance(choice, dict) and "text" in choice:
+            return choice["text"]
+    # Last resort: return JSON string
     return json.dumps(data) if isinstance(data, (dict, list)) else str(data)
 
 def extract_text(uploaded_file) -> str:
@@ -184,18 +203,18 @@ def generate_pdf(report_data, compliance_score, filename="compliance_report.pdf"
     return buffer
 
 # ------------------- UI -------------------
-st.title("🧾 AI Compliance Checker (IBM Granite)")
-st.write("Analyze contracts and policies for missing clauses and compliance risks. Uses IBM Granite via Hugging Face Inference API.")
+st.title("🧾 AI Compliance Checker (MiniMax via HF Router)")
+st.write("Analyze contracts and policies for missing clauses and compliance risks. Uses MiniMax through Hugging Face Router (OpenAI-compatible API).")
 
 if not HF_TOKEN:
-    st.warning("Hugging Face HF_TOKEN not found in `st.secrets`. Add HF_TOKEN to Streamlit Secrets before using the app.")
-    st.write("Follow: Settings -> Secrets -> add `HF_TOKEN = \"hf_xxx...\"`")
+    st.warning("Hugging Face HF_TOKEN not found in `st.secrets` or environment. Add HF_TOKEN before using the app.")
+    st.write("In Streamlit Cloud: Settings → Secrets → add `HF_TOKEN = \"hf_xxx...\"` — or set an environment variable HF_TOKEN on your machine.")
     # still allow demo with a placeholder but will not work
     # return early? Continue but model calls will fail.
     
 industry = st.sidebar.selectbox("Select Industry Type:", ["General", "Banking", "Healthcare", "IT", "Legal"])
 st.sidebar.markdown("---")
-st.sidebar.markdown("⚙️ This demo uses the `ibm-granite/granite-13b-instruct` model via Hugging Face Inference API.")
+st.sidebar.markdown("⚙️ This demo uses the MiniMax model `MiniMaxAI/MiniMax-M2:novita` via Hugging Face Router chat completions.")
 st.sidebar.markdown("Tip: Keep documents under ~20 pages for best results. The app sends the first chunk of the document to the model.")
 
 uploaded_file = st.file_uploader("Upload a document (.pdf, .docx, .txt)", type=["pdf", "docx", "txt"])
@@ -234,10 +253,14 @@ Document (end).
 If no issues are found, return an empty JSON array: []
 """
     st.write("")  # spacing
-    if st.button("🔍 Analyze with Granite"):
-        with st.spinner("Contacting Granite model (may take ~10-90s on cold start)..."):
+    if st.button("🔍 Analyze with MiniMax"):
+        with st.spinner("Contacting MiniMax model (may take ~10-90s on cold start)..."):
             try:
-                raw = query_model(base_prompt, max_length=1024)
+                # Send previous prompt as a single user message to chat endpoint
+                messages = [
+                    {"role": "user", "content": base_prompt}
+                ]
+                raw = query_chat(messages, max_tokens=1024, temperature=0.0)
             except Exception as e:
                 st.error("Model query failed: " + str(e))
                 raw = None
