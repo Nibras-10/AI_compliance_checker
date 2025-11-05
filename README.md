@@ -7,7 +7,7 @@ Analyze contracts and policies for missing clauses and compliance risks. This St
 ## Features
 
 - Upload PDF, DOCX, or TXT
-- Local text extraction (PyPDF2, python-docx)
+- Local text extraction (PyPDF2, python-docx) 
 - Clear analysis prompt tailored by industry (General, Banking, Healthcare, IT, Legal)
 - Model output expected as JSON list of issues with keys:
   - `section`, `risk`, `explanation`, `risk_level` (High/Medium/Low)
