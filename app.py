@@ -203,8 +203,8 @@ def generate_pdf(report_data, compliance_score, filename="compliance_report.pdf"
     return buffer
 
 # ------------------- UI -------------------
-st.title("🧾 AI Compliance Checker (Granite)")
-st.write("Analyze contracts and policies for missing clauses and compliance risks. Uses MiniMax through Hugging Face Router (OpenAI-compatible API).")
+st.title("🧾 AI Compliance Checker (IBM Granite)")
+st.write("Analyze contracts and policies for missing clauses and compliance risks. Uses IBM Granite via Hugging Face Inference API.")
 
 if not HF_TOKEN:
     st.warning("Hugging Face HF_TOKEN not found in `st.secrets` or environment. Add HF_TOKEN before using the app.")
@@ -214,7 +214,7 @@ if not HF_TOKEN:
     
 industry = st.sidebar.selectbox("Select Industry Type:", ["General", "Banking", "Healthcare", "IT", "Legal"])
 st.sidebar.markdown("---")
-st.sidebar.markdown("⚙️ This demo uses the MiniMax model `MiniMaxAI/MiniMax-M2:novita` via Hugging Face Router chat completions.")
+st.sidebar.markdown("⚙️ This demo uses the `ibm-granite/granite-13b-instruct` model via Hugging Face Inference API.")
 st.sidebar.markdown("Tip: Keep documents under ~20 pages for best results. The app sends the first chunk of the document to the model.")
 
 uploaded_file = st.file_uploader("Upload a document (.pdf, .docx, .txt)", type=["pdf", "docx", "txt"])
@@ -253,8 +253,8 @@ Document (end).
 If no issues are found, return an empty JSON array: []
 """
     st.write("")  # spacing
-    if st.button("🔍 Analyze with MiniMax"):
-        with st.spinner("Contacting MiniMax model (may take ~10-90s on cold start)..."):
+    if st.button("🔍 Analyze with Granite"):
+        with st.spinner("Contacting Granite model (may take ~10-90s on cold start)..."):
             try:
                 # Send previous prompt as a single user message to chat endpoint
                 messages = [
