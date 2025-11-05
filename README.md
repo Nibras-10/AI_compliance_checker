@@ -2,7 +2,7 @@
 
 Analyze contracts and policies for missing clauses and compliance risks. This Streamlit app extracts text from uploaded documents and asks an LLM to produce a structured JSON list of issues, then computes a simple compliance score and generates a PDF report.
 
-> Note on models: The UI refers to IBM Granite by request. The current backend calls the MiniMax model via the Hugging Face Router (OpenAI-compatible API). You can switch to Granite Inference easily if desired; see “Switching models” below.
+
 
 ## Features
 
@@ -56,17 +56,7 @@ Open the local URL printed by Streamlit (typically http://localhost:8501).
 - The app asks the model to return ONLY JSON. A resilient parser then extracts/repairs the JSON if the response includes extra prose, code fences, smart quotes, or trailing commas.
 - A score is computed (High=25, Medium=10, Low=3, plus a small volume penalty) and a PDF report is created.
 
-## Switching models
 
-You can keep the UI as-is and switch the backend model in `app.py`:
-
-- Current: Hugging Face Router (OpenAI-compatible) with MiniMax
-  - Endpoint: `https://router.huggingface.co/v1/chat/completions`
-  - Model id: `MiniMaxAI/MiniMax-M2:novita`
-- Option A: Keep the Router but change the `model` string to another compatible chat model.
-- Option B: Use Hugging Face Inference for IBM Granite, which expects a different payload (`{"inputs": ..., "parameters": ...}`) and a different endpoint like `https://api-inference.huggingface.co/models/ibm-granite/granite-13b-instruct`.
-
-If you want, open an issue or request and we can wire Granite Inference back in for you.
 
 ## Troubleshooting
 
