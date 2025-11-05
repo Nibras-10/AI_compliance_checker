@@ -203,7 +203,7 @@ def generate_pdf(report_data, compliance_score, filename="compliance_report.pdf"
     return buffer
 
 # ------------------- UI -------------------
-st.title("🧾 AI Compliance Checker (MiniMax via HF Router)")
+st.title("🧾 AI Compliance Checker (Granite)")
 st.write("Analyze contracts and policies for missing clauses and compliance risks. Uses MiniMax through Hugging Face Router (OpenAI-compatible API).")
 
 if not HF_TOKEN:
