@@ -124,6 +124,30 @@ def find_json_in_text(s: str):
                     continue
     return None
 
+def strip_thoughts(text: str) -> str:
+    """
+    Remove any 'thought'/'reasoning' content from model output.
+    - Strips XML-like tags: <think>...</think>, <thinking>...</thinking>, etc.
+    - Removes leading lines like "Thought:" or "Reasoning:" blocks.
+    Returns cleaned text.
+    """
+    if not isinstance(text, str):
+        return text
+    cleaned = text
+    # Remove XML-like reasoning blocks
+    tag_patterns = [
+        r"<think>.*?</think>",
+        r"<thinking>.*?</thinking>",
+        r"<chain_of_thought>.*?</chain_of_thought>",
+        r"<reasoning>.*?</reasoning>",
+    ]
+    for pat in tag_patterns:
+        cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+
+    # Remove prefixed reasoning paragraphs like "Thought:" or "Reasoning:" up to a blank line
+    cleaned = re.sub(r"(?is)^\s*(thoughts?|reasoning)\s*:\s*.*?(\n\s*\n|$)", "", cleaned)
+    return cleaned.strip()
+
 def risk_icon(level: str):
     l = (level or "").strip().lower()
     if l == "high":
@@ -216,6 +240,7 @@ industry = st.sidebar.selectbox("Select Industry Type:", ["General", "Banking", 
 st.sidebar.markdown("---")
 st.sidebar.markdown("⚙️ This demo uses the `ibm-granite/granite-13b-instruct` model via Hugging Face Inference API.")
 st.sidebar.markdown("Tip: Keep documents under ~20 pages for best results. The app sends the first chunk of the document to the model.")
+show_debug = st.sidebar.checkbox("Developer: show debug output", value=False)
 
 uploaded_file = st.file_uploader("Upload a document (.pdf, .docx, .txt)", type=["pdf", "docx", "txt"])
 
@@ -261,6 +286,7 @@ If no issues are found, return an empty JSON array: []
                     {"role": "user", "content": base_prompt}
                 ]
                 raw = query_chat(messages, max_tokens=1024, temperature=0.0)
+                raw = strip_thoughts(raw)
             except Exception as e:
                 st.error("Model query failed: " + str(e))
                 raw = None
@@ -268,8 +294,9 @@ If no issues are found, return an empty JSON array: []
         if raw is None:
             st.error("No response from model.")
         else:
-            st.subheader("Raw model output (first 2000 chars) — for debugging")
-            st.text(raw[:2000])
+            if show_debug:
+                st.subheader("Raw model output (first 2000 chars) — debug")
+                st.text(raw[:2000])
 
             parsed = find_json_in_text(raw)
             if parsed is None:
